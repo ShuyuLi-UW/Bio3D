@@ -1,0 +1,175 @@
+---
+title: "Demo_2"
+author: "Shuyu Li"
+date: "2025-04-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+library(bio3d)
+```
+
+## 1. Manipulate a PDB Object
+
+Below we provide a basic example of such a manipulation process where we read in a multi-chained PDB structure, reassign chain identifiers, and renumber selected residues.
+
+```{r}
+pdb <- read.pdb("4lhy")
+
+# select chain A, E, F
+
+pdb2 <- atom.select(pdb, chain = c("A", "E", "F"), value = TRUE)
+
+# assign new chain indentifiers
+pdb2$atom$chain[pdb2$atom$chain == "E"] <- "B"
+pdb2$atom$chain[pdb2$atom$chain == "E"] <- "C"
+
+# re-number chain B and C
+pdb2$atom$resno[pdb2$atom$chain == "B"] <- pdb2$atom$resno[pdb2$atom$chain == "B"] - 156
+pdb2$atom$resno[pdb2$atom$chain == "C"] <- pdb2$atom$resno[pdb2$atom$chain == "C"] - 156
+
+# assign GDP residue a residue number of 500
+pdb2$atom$resno[pdb2$atom$resid == "GDP"] <- 500
+
+# use chain D for the GDP residue
+pdb2$atom$chain[pdb2$atom$resid == "GDP"] <- "D"
+
+# center, to the coordinate origin, and orient, by princupal axes, the coordinates of a given PDB structure or xyz vector.
+help("orient.pdb")
+xyz <- orient.pdb(pdb2)
+
+# write to a new pdb structure
+write.pdb(pdb2, xyz = xyz, file="4LHY_AEF-oriented.pdb")
+```
+
+## 2. Concatenate Multiple PDBs
+
+Function `cat.pdb()` can be used to concatenate two or more PDB files. This function contains moreover arguments to re-assign residue numbers and chain identifiers.
+
+```{r}
+a <-read.pdb("4q21")
+b <- read.pdb("4lhy")
+
+# extracte different chains from different structures
+a1 <- trim.pdb(a, chain = "A")
+b1 <- trim.pdb(b, chain = "A")
+b2 <- trim.pdb(b, chain = "E")
+b3 <- trim.pdb(b, chain = "F")
+
+# concatenate PDBs
+help("cat.pdb")
+new <- cat.pdb(a1, b1, b2, b3, rechain = TRUE) # assign new chain identifiers to all smaller PDB structures
+unique(new$atom$chain)
+
+# write to a new PDB structure
+write.pdb(new, file="4Q21-4LHY.pdb")
+```
+
+## 3. Coordinate Superposition and Structural Alignment
+
+### 3.1 Install Dependency: MUSCLE
+
+Before run this chunk, make sure already downloaded muscle. Notice that Bio3d hasn't support MUSCLE v5, please download v3 from <https://drive5.com/muscle/downloads_v3.htm>. The MUSCLE multiple sequence alignment program must be installed on your system and in the search path for executables in order to run functions `pdbfit()` and `struct.aln()` as these call the `seqaln()` function, which is based on MUSCLE. 
+
+### 3.2 MSA
+
+Bio3D offers versatile functionality for coordinate superposition at various levels. The simplest level is sequence only based superposition:
+
+```{r}
+help("pdbaln")
+pdbs <- pdbaln(c("4q21", "521p"), fit = TRUE)
+print(pdbs)
+```
+
+Here I used for GECIs multiple sequences alignments. (Just an example, not really useful for my project.)
+
+```{r}
+GECIs <- pdbaln(c("4i2y", "7st4", "3ek4", "3sg3", "3wlc", "3u0k"), fit = TRUE)
+print(GECIs)
+```
+
+### 3.3 Structures Alignment
+
+An alternative approach is to use a structure only alignment method as a basis for superposition. This is particularly useful when the structures (and hence usually the sequences) to be compared are dissimilar to the point where sequence comparison may give erroneous results.
+
+The difference between `pdbaln()` and `struct.aln()`:
+
+-   `pdbaln()` → Focuses on sequence alignment across multiple PDBs.
+-   `struct.aln()` → Focuses on structural alignment of two PDBs.
+
+```{r}
+# read 2 G-protein structures
+a <- read.pdb("4q21")
+b <- read.pdb("4lhy")
+
+# perform iterative structual alignment
+aln <- struct.aln(a, b)
+
+# store new coordinates of protein B
+b$xyz <- aln$xyz
+```
+
+Note that `struct.aln()` performs cycles of refinement steps of the structural alignment to improve the fit by removing atoms with a high structural deviation. At each cycle it prints associated RMSD value of atoms included in the alignment. The resulting superimposed structures are optionally written to your hard drive at default folder with name `fitlsq/`.
+
+Similarly, I used this function to our GECIs. JRG is RGECO, JCP is RCaMP. But I don't know why when I used ChimeraX to open the alignment result file, it doesn't show which is from which.
+
+```{r}
+JRG<- read.pdb("4i2y")
+JCP <- read.pdb("3u0k")
+
+aln_sensors <- struct.aln(JRG, JCP)
+```
+
+While `struct.aln()` operates on a pair of PDB objects, function `fit.xyz()` can perform coordinate superposition on multiple structures. However, indices needs to provided ensuring the same number of atoms for which the fitting should be based. 
+
+The difference between `struct.aln()` and `fit.xyz()` is `struct.aln()` aligns both sequences and structures, it Works best for aligning two protein structures with unequal but related sequences. However, fit.xyz() does not perform sequence alignment—just optimizes spatial overlap. It needs to provide indices.
+
+```{r}
+# indices at which the superposition should be based
+a.ind <- atom.select(a, chain="A", resno=87:103, elety="CA")
+b.ind <- atom.select(b, chain="A", resno=93:109, elety="CA")
+
+# perform superposition
+xyz <- fit.xyz(fixed=a$xyz, mobile=b$xyz,
+               fixed.inds=a.ind$xyz,
+               mobile.inds=b.ind$xyz)
+
+# write coordinates to file
+write.pdb(b, xyz=xyz, file = "4LHY-at-4Q21.pdb")
+```
+
+## 4. Binding Site Identification
+
+```{r}
+# read G-protein structure
+pdb <- read.pdb("4q21")
+bs <- binding.site(pdb)
+```
+
+```{r}
+# residue names of identified binding site
+print(bs$resnames)
+```
+
+```{r}
+b <- read.pdb("4lhy")
+
+# atom selection
+a.inds <- atom.select(b, chain="A")
+b.inds <- atom.select(b, chain=c("E", "F"))
+
+# identify interface residues
+bs <- binding.site(b, a.inds=a.inds, b.inds=b.inds)
+
+# use b-factor column to store interface in PDB file
+b$atom$b[ bs$inds$atom ] <- 1
+b$atom$b[ -bs$inds$atom ] <- 0
+
+# write to file
+write.pdb(b, file="4LHY-interface.pdb")
+```

@@ -1,0 +1,206 @@
+---
+title: "Bio3D"
+author: "Shuyu Li"
+start date: "2025-04-24"
+finish date: "2025-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Bio3D
+
+```{r}
+library(bio3d)
+lbio3d() # show all functions in bio3d
+?cmap # get help for a specific function
+help.search("pdb") # search for documentation maching a particular word
+```
+
+## 1. Working with Individual PDB Files
+
+PDB coordinate files contain a list of all the atoms of one or more molecular structures. Each atom position is defined by its x, y, z coordinates in a conventional orthogonal coordinate system. Additional data, including listings of observed secondary structure elements, are also commonly (but not always) detailed in PDB files.
+
+### 1.1 Read a PDB File
+
+To read a single PDB file with Bio3D we can use the **read.pdb()** function. The minimal input required for this function is a specification of the file to be read. This can be either the file name of a local file on disc or the RCSB PDB identifier of a file to read directly from the on-line PDB repository.
+
+```{r}
+pdb <- read.pdb("4q21") # get structure from PDB server
+print(pdb)
+```
+
++attr: list the attributes of this object.
+
+### 1.2 Work with Attributes
+
+```{r}
+# can find out the attributes of an object by:
+attributes(pdb)
+
+# can access individual attributes by object_name$attribute_name
+print(pdb$helix)
+print(pdb$sheet)
+head(pdb$atom)
+
+# Print $atom data for the first two atoms
+pdb$atom[1:2, ]
+
+# Print a subset of $atom data for the first two atoms
+pdb$atom[1:2, c("eleno", "elety", "resid", "x", "y", "z")]
+```
+
+#### Plot the Ca's B-factor
+
+The **B-factor** (also known as the temperature factor) in a PDB file represents the atomic displacement or flexibility of atoms in a protein structure. It provides insight into how much an atom moves within the crystal structure due to thermal vibrations or disorder.
+
+-   Higher B-factor → Indicates greater movement or flexibility.
+-   Lower B-factor → Suggests a more stable and rigid atomic position.
+
+```{r}
+all_b <- pdb$atom$b
+#print(all_b)
+Ca <- pdb$calpha # identify whether the atom is Ca
+#print(Ca)
+
+plot.bio3d(all_b[Ca], sse = pdb, typ = "l", ylab = "B-factor")
+
+# same as:
+plot.bio3d(pdb$atom$b[pdb$calpha], sse=pdb, typ="l", ylab="B-factor")
+```
+
+the main `xyz` coordinate attribute is a numeric matrix with 3N columns (each atom has three values x, y and z). The number of rows here correspond to the number of models in the PDB file (typically 1 for X-ray structures and multiple for NMR structures).
+
+```{r}
+pdb$xyz
+dim(pdb$xyz)
+```
+
+#### 1.3 Atoms Coordinates
+
+The `atom2xyz` function in the Bio3D package converts atom indices into their corresponding XYZ coordinate indices. `atom2xyz(num)` takes a numeric vector of atom indices and returns the indices for their XYZ coordinates.
+
+```{r}
+# show the first two atoms xyz coordinates
+pdb$xyz[1, atom2xyz(1:2)]
+```
+
+#### 1.5 Side-note: The 'PDB' Class
+
+The "pdb" object created above also has a second class, namely "sse" (see the output of `attributes(pdb)` or `class(pdb)`). This stands for *secondary structure elements* and is recognized by the `plot.bio3d()` function to annotate the positions of major secondary structure elements in the marginal regions of these plots.
+
+## 2. Atom Selection
+
+### 2.1 Normal Selection
+
+`atom.select()` operates on PDB structure objects (as created by `read.pdb()`) and returns the numeric indices of a selected atom subset. These indices can then be used to access the `$atom` and `$xyz` attributes of PDB structure related objects.
+
+```{r}
+# select indices for all Ca atoms
+ca.inds <- atom.select(pdb, "calpha")
+print(ca.inds)
+
+```
+
+Note that the attributes of the returned `ca.inds` from `atom.select()` include both `atom` and `xyz` components. These are numeric vectors that can be used as indices to access the corresponding atom and xyz components of the input PDB structure object.
+
+`ca.inds` is a list with the following components:
+
+-   `atom` → A numeric vector of atomic indices (which atoms are selected).
+-   `xyz` → A numeric vector of XYZ coordinate indices (which coordinates correspond to the selected atoms).
+-   `call` → The matched function call (for reference).
+
+```{r}
+# print details of all Ca atoms
+print(pdb$atom[ca.inds$atom, ])
+
+# print xyz coordinates of first few Ca
+head(pdb$xyz[ ,ca.inds$xyz])
+
+```
+
+In Bio3D, besides using common selection strings like `"calpha"`, `"cbeta"`, `"backbone"`, `"protein"`, `"ligand"`, `"water"`, etc., you can also select atoms based on specific properties such as:
+
+-   Atom Name (`elety`) → Select atoms by their element type (e.g., `"CA"` for C-alpha, `"O"` for oxygen).
+-   Residue Name (`resid`) → Select atoms belonging to specific residues (e.g., `"ALA"` for alanine).
+-   Residue Number (`resno`) → Select atoms by residue index.
+-   Chain ID (`chain`) → Select atoms from a specific chain (e.g., `"A"` for chain A).
+-   Segment ID (`segid`) → Select atoms based on segment identifiers.
+-   Insertion Code (`insert`) → Select atoms with specific insertion codes.
+-   Element Number (`eleno`) → Select atoms by their unique element number.
+
+```{r}
+# select chain A
+a.inds <- atom.select(pdb, chain = "A")
+
+# select Ca atoms on Chain A
+aca.inds <- atom.select(pdb, "calpha", chain = "A")
+
+# Combine multiple selection criteria
+cab.inds <- atom.select(pdb, chain = "A", elety = c("CA", "CB"), resno = 10:20)
+cb30.inds <- atom.select(pdb, chain = "A", elety = "CB", resno = 30 )
+```
+
+### 2.2 Inverse selection
+
+Inverse selection is select all atoms except the atoms passed to the function.
+
+```{r}
+nowater.inds <- atom.select(pdb, "water", inverse = TRUE)
+```
+
+### 2.3 Combing Selections
+
+in `atom.select()`, the default parameter of operator is operator = "AND". When multiple selection criteria are used, only atoms that satisfy ALL conditions are selected. If change operator = "OR", it will broaden the selection by including atoms that satisfy at least one of the conditions.
+
+```{r}
+# select protein and GDP
+sele <- atom.select(pdb, "protein", resid = "GDP", operator = "OR")
+```
+
+Function `combine.select()` provides further functionality to combine selections. For example the above selection of protein and GDP can be completed with:
+
+```{r}
+protein.inds <- atom.select(pdb, "protein")
+gdp.inds <- atom.select(pdb, resid = "GDP")
+sele <- combine.select(protein.inds, gdp.inds, operator = "OR")
+```
+
+#### Question:
+
+Using atom.select how would you extract the amino acid sequence of your structure in 3-letter and 1-letter forms?
+
+#### Answer:
+
+irst select the C-alpha atoms, and use the returned atom indices to access the `resid` values of `pdb$atom`.
+
+```{r}
+aa <- pdb$atom$resid[atom.select(pdb, "calpha")$atom]
+head(aa)
+```
+
+Use the utility function `aa321()` to convert to 1-letter from.
+
+```{r}
+aa321(aa)
+```
+
+## 3. Write a PDB Object
+
+Use the command `write.pdb()` to output a structure object to a PDB formatted file on your local hard drive. Below we use function `atom.select()` to select only the backbone atoms, and `trim.pdb()` to create a new PDB object based on our selection of backbone atoms. Finally we use the function `write.pdb()` to write the newly generated PDB file containing only the backbone atoms:
+
+```{r}
+backbone.inds <- atom.select(pdb, "back")
+help("trim.pdb")
+backbone_pdb <- trim.pdb(pdb, backbone.inds, sse = "TRUE")
+write.pdb(backbone_pdb, file = "4q21_backbone.pdb")
+```
+
+3.1 Side-note\
+function `atom.select()` can also return the resulting trimmed `pdb` object using the optional argument `value=TRUE`.
+
+```{r}
+backbone_pdb <- atom.select(pdb, "back", value = TRUE)
+```

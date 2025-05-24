@@ -1,0 +1,160 @@
+---
+title: "PCA"
+author: "Shuyu Li"
+date: "2025-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Working with single PDB structures
+
+```{r}
+library(bio3d)
+demo("pdb")
+demo("pca")
+```
+
+```{r}
+pdb <- read.pdb("1tag")
+pdb
+```
+
+use `attributes(pdb)` to list components that comprise the pdb object. Each individual component can be accessed by using the \$.
+
+```{r}
+attributes(pdb)
+pdb$atom
+#pdb$helix
+#pdb$sheet
+#pdb$calpha
+```
+
+The atom component is a data frame consisting of all atomic coordinate data, witha row per ATOM and column per record type. The column names can be used as a convenient means of data access.
+
+```{r}
+pdb$atom[1:3, c("resno","resid","x","y","z")]
+```
+
+```{r}
+ca.inds <-atom.select(pdb, "calpha") # the coordinates of all carbon alpha atoms
+Bfactor <- pdb$atom$b[ca.inds$atom]
+plot.bio3d(Bfactor, resno=pdb, sse=pdb, ylab="B-facctor",xlab="Residue")
+```
+
+## Working with multiple PDB structures
+
+Use `get.pdb()` to download multiple PDB files from PDB database.
+
+```{r}
+ids <- c("1TND_B","1AGR_A","1FQJ_A","1TAG_A","1GG2_A","1KJY_A")
+raw.files <- get.pdb(ids)
+```
+
+Use pdbsplit() to extract the particular chains from pdb files. The use pdbaln to align requested chains structural data.
+
+```{r}
+files <- pdbsplit(raw.files, ids)
+pdbs <- pdbaln(files)
+```
+
+```{r}
+# Calculate sequence identity
+pdbs$id <- substr(basename(pdbs$id), 1, 6)
+seqidentity(pdbs)
+```
+
+```{r}
+# Calculate RMSD
+rmsd(pdbs, fit=TRUE) # fit=TRUE: superimpose all structures to a reference before computing RMSD
+```
+
+# Constructing experimental structure ensembles for a protein family
+
+Comparing multiple structures of homologous proteins and carefully analyzing large multiple sequence alignments can help identify patterns of sequence and structural conservation and highlight conserved interactions that are crucial for protein stability and function (Grant et al. 2007).
+
+## Finding available sets of similar structures
+
+```{r}
+pdb <- read.pdb("4EUL")
+seq <- pdbseq(pdb)
+blast <- blast.pdb(seq)
+```
+
+```{r}
+attributes(blast)
+# access PDB ids and E values of the blast result
+blast$hit.tbl
+```
+
+Examining the alignment scores and their associated E-values (with the function `plot.blast()`) indicates a sensible normalized score (-log(E-Value)) cutoff of  240 bits
+
+```{r}
+hits <- plot.blast(blast, cutoff=220) # cutoff=240:filters hits based on alignment length — only hits with alignment length ≥ 240 residues are plotted and returned.
+```
+
+List a subset of the top hits.
+
+```{r}
+head(hits$hits)
+head(hits$pdb.id)
+```
+
+The function `pdb.annotate()` can fetch detailed information about the corresponding structures (e.g. title, experimental method, resolution, ligand name(s), citation, etc.). 
+
+```{r}
+anno <- pdb.annotate(hits$pdb.id)
+head(anno[, c("resolution", "ligandId", "citation")])
+```
+
+## Multiple sequence alignment
+
+```{r}
+filtered_hits <- blast$hit.tbl[blast$hit.tbl$identity>80 & blast$hit.tbl$evalue < 1e-30, ]
+hits <- filtered_hits$pdb.id
+```
+
+```{r}
+# Download PDBs and split by chain ID
+files <- get.pdb(hits, path="FPs_pdbs", split = TRUE)
+files <- list.files("FPs", pattern="*.pdb", full.names=TRUE)
+files <- files[file.exists(files) & !is.na(files)]
+# Extract and align sequences, this step may take a ling time, be patient...
+pdbs <- pdbaln(files, exepath=muscle.path)
+```
+
+# Comparative structure analysis
+
+The detailed comparison of homologous protein structures can be used to infer pathways for evolutionary adaptation and, at closer evolutionary distances, mechanisms for conformational change.
+
+## Structure superposition
+
+Conventional structural superposition of proteins minimizes the root mean square difference between their full set of equivalent residues. This can be performed with Bio3D functions `pdbfit()` and `fit.xyz()` as outlined previously. However, for certain applications such a superposition procedure can be inappropriate. For example, in the comparison of a multi-domain protein that has undergone a hinge-like rearrangement of its domains, standard all atom superposition would result in an underestimate of the true atomic displacement by attempting superposition over all domains (whole structure superposition). A more appropriate and insightful superposition would be anchored at the most invariant region and hence more clearly highlight the domain rearrangement (sub-structure superposition).
+
+The Bio3D `core.find()` function implements an iterated superposition procedure, where residues displaying the largest positional differences are identified and excluded at each round. The function returns an ordered list of excluded residues, from which the user can select a subset of ’core’ residues upon which superposition can be based.
+
+```{r}
+core <- core.find(pdbs)
+```
+
+```{r}
+col=rep("black", length(core$volume))
+col[core$volume<5]="yellow"; col[core$volume<1]="red"
+plot(core, col=col)
+```
+
+```{r}
+core.inds <- print(core, vol=1.5)
+```
+
+```{r}
+write.pdb(xyz=pdbs$xyz[1,core.inds$xyz], file="FPs_core.pdb")
+```
+
+```{r}
+xyz <- pdbfit( pdbs, core.inds )
+```
+
+## Standard Structural Analysis

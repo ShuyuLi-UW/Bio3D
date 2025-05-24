@@ -1,0 +1,340 @@
+---
+title: "Demo"
+author: "Shuyu Li"
+date: "2025-05-24"
+output: html_document
+---
+
+# Load Bio3d
+
+```{r}
+library(bio3d)
+```
+
+# Working with Individual PDB Files
+
+```{r}
+# get structure from PDB server
+RFP <- read.pdb("1ZGO") # 1ZGO.pdb is the PDB file of a red fluorescent protein (dsRed)
+RFP
+```
+
+use `attributes(pdb)` to list components that comprise the pdb object. Each individual component can be accessed by using the \$.
+
+```{r}
+# can find out the attributes of an object by:
+attributes(RFP)
+# can access individual attributes by object_name$attribute_name
+print(RFP$atom) # show each atom's information
+print(RFP$helix)
+print(RFP$sheet)
+print(RFP$calpha) # the bool values show whether an atom is C alpha atom
+
+# Print $atom data for the first two atoms
+RFP$atom[1:2, ]
+# Print a subset of $atom data for the first two atoms
+RFP$atom[1:2, c("eleno", "elety", "resid", "x", "y", "z")]
+```
+
+## Plot the Ca's B-factor
+
+The **B-factor** (also known as the temperature factor) in a PDB file represents the atomic displacement or flexibility of atoms in a protein structure. It provides insight into how much an atom moves within the crystal structure due to thermal vibrations or disorder.
+
+-   Higher B-factor → Indicates greater movement or flexibility.
+-   Lower B-factor → Suggests a more stable and rigid atomic position.
+
+```{r}
+# extract all information about chain A
+RFP_A <- trim(RFP, chain = "A", elety = "CA")
+# extract B-factors of atoms on chain A
+b_chain_A <- RFP_A$atom$b
+# plot
+plot.bio3d(b_chain_A, sse = RFP_A, typ = "l", ylab = "B-factor (Chain A)")
+```
+
+**Side-note:** The "RFP" object created above also has a second class, namely "sse" (see the output of `attributes(RFP)` or `class(RFP)`). This stands for *secondary structure elements* and is recognized by the `plot.bio3d()` function to annotate the positions of major secondary structure elements in the marginal regions of these plots.
+
+## Plot the Torsion/Dihedral Analysis
+
+The conformation of a polypeptide or nucleotide chain can be usefully described in terms of angles of internal rotation around its constituent bonds.
+
+```{r}
+tor <- torsion.pdb(trim(RFP, chain = "A"))
+# Basic Ramachandran plot
+plot(tor$phi, tor$psi, xlab="phi", ylab="psi")
+```
+
+## Atom Selection
+
+### Normal Selection
+
+`atom.select()` operates on PDB structure objects (as created by `read.pdb()`) and returns the numeric indices of a selected atom subset. These indices can then be used to access the `$atom` and `$xyz` attributes of PDB structure related objects.
+
+```{r}
+# select indices for all Ca atoms
+ca.inds <- atom.select(RFP, "calpha")
+print(ca.inds)
+```
+
+Note that the attributes of the returned `ca.inds` from `atom.select()` include both `atom` and `xyz` components. These are numeric vectors that can be used as indices to access the corresponding atom and xyz components of the input PDB structure object.
+
+`ca.inds` is a list with the following components:
+
+-   `atom` → A numeric vector of atomic indices (which atoms are selected).
+-   `xyz` → A numeric vector of XYZ coordinate indices (which coordinates correspond to the selected atoms).
+-   `call` → The matched function call (for reference).
+
+```{r}
+# print details of all Ca atoms
+print(RFP$atom[ca.inds$atom, ])
+
+# print xyz coordinates of first few Ca
+head(RFP$xyz[ ,ca.inds$xyz])
+```
+
+In Bio3D, besides using common selection strings like `"calpha"`, `"cbeta"`, `"backbone"`, `"protein"`, `"ligand"`, `"water"`, etc., you can also select atoms based on specific properties such as:
+
+-   Atom Name (`elety`) → Select atoms by their element type (e.g., `"CA"` for C-alpha, `"O"` for oxygen).
+-   Residue Name (`resid`) → Select atoms belonging to specific residues (e.g., `"ALA"` for alanine).
+-   Residue Number (`resno`) → Select atoms by residue index.
+-   Chain ID (`chain`) → Select atoms from a specific chain (e.g., `"A"` for chain A).
+-   Segment ID (`segid`) → Select atoms based on segment identifiers.
+-   Insertion Code (`insert`) → Select atoms with specific insertion codes.
+-   Element Number (`eleno`) → Select atoms by their unique element number.
+
+```{r}
+# select chain A
+a.inds <- atom.select(RFP, chain = "A")
+
+# select Ca atoms on Chain A
+aca.inds <- atom.select(RFP, "calpha", chain = "A")
+
+# Combine multiple selection criteria
+cab.inds <- atom.select(RFP, chain = "A", elety = c("CA", "CB"), resno = 10:20)
+cb30.inds <- atom.select(RFP, chain = "A", elety = "CB", resno = 30 )
+```
+
+### Inverse Selection
+
+Inverse selection is select all atoms except the atoms passed to the function.
+
+```{r}
+nowater.inds <- atom.select(RFP, "water", inverse = TRUE)
+```
+
+### Combing Selections
+
+in `atom.select()`, the default parameter of operator is operator = "AND". When multiple selection criteria are used, only atoms that satisfy ALL conditions are selected. If change operator = "OR", it will broaden the selection by including atoms that satisfy at least one of the conditions.
+
+```{r}
+# select protein and GDP 
+sele <- atom.select(RFP, "protein", resid = "GDP", operator = "OR")
+```
+
+Function `combine.select()` provides further functionality to combine selections. For example the above selection of protein and GDP can be completed with:
+
+```{r}
+protein.inds <- atom.select(RFP, "protein") 
+gdp.inds <- atom.select(RFP, resid = "GDP") 
+sele <- combine.select(protein.inds, gdp.inds, operator = "OR")
+```
+
+# Write a PDB Object
+
+Use the command `write.pdb()` to output a structure object to a PDB formatted file on your local hard drive. Below we use function `atom.select()` to select only the backbone atoms, and `trim.pdb()` to create a new PDB object based on our selection of backbone atoms. Finally we use the function `write.pdb()` to write the newly generated PDB file containing only the backbone atoms:
+
+```{r}
+backbone.inds <- atom.select(RFP_A, "back") 
+help("trim.pdb") 
+backbone_pdb <- trim.pdb(RFP_A, backbone.inds, sse = "TRUE") 
+write.pdb(backbone_pdb, file = "1ZGO_BB.pdb")
+```
+
+**Side-note:** function `atom.select()` can also return the resulting trimmed `pdb` object using the optional argument `value=TRUE`.
+
+`{r} backbone_pdb <- atom.select(pdb, "back", value = TRUE)}`
+
+# Working With Multiple PDB Files
+
+Use `get.pdb()` to download multiple PDB files from PDB database.
+
+```{r}
+# these are some normal green fluorescent proteins
+ids <- c("1GFL_A","2B3P_A","2Y0G_A","1QYO_A")
+raw.files <- get.pdb(ids)
+```
+
+Use `pdbsplit()` to extract the particular chains from pdb files. Then use `pdbaln()` to align requested chains structural data.
+
+```{r}
+files <- pdbsplit(raw.files, ids)
+GFPs <- pdbaln(files)
+```
+
+## Calculate Sequence Identity
+
+```{r}
+GFPs$id <- substr(basename(GFPs$id), 1, 4)
+seqidentity(GFPs)
+```
+
+## Calculate RMSD
+
+```{r}
+rmsd(GFPs, fit=TRUE) # fit=TRUE: superimpose all structures to a reference before computing RMSD
+```
+
+# Constructing experimental structure ensembles for a protein family
+
+Comparing multiple structures of homologous proteins and carefully analyzing large multiple sequence alignments can help identify patterns of sequence and structural conservation and highlight conserved interactions that are crucial for protein stability and function (Grant et al. 2007).
+
+In here, I didn't use `blast()` function in Bio3D to search possible homologous sequences. I blast on NCBI database and download the structures from PDB database directly.
+
+```{r}
+pdb_dir <- "./FPs"
+pdb_files <- list.files(pdb_dir, pattern="\\.pdb$", full.names=TRUE)
+
+# extract PDB ID from file names
+pdb_ids <- toupper(tools::file_path_sans_ext(basename(pdb_files)))
+print(pdb_ids)
+
+# annotate each structure
+anno <- pdb.annotate(pdb_ids)
+anno[, c("resolution", "source", "structureTitle", "citation")]
+```
+
+## Multiple Sequences Alignment
+
+```{r}
+# extract chian A from each raw PDB files
+output_dir <- "FPs_chain_A"
+dir.create(output_dir, showWarnings = FALSE)
+
+files <- list.files(pdb_dir, pattern = "\\.pdb$", full.names = TRUE)
+
+for (f in files) {
+  cat("Processing:", basename(f), "\n")
+  pdb <- tryCatch(read.pdb(f), error = function(e) NULL)
+  if (is.null(pdb)) {
+    cat(" - Skipping: read.pdb failed\n")
+    next
+  }
+  
+  pdb_A <- tryCatch(trim(pdb, chain = "A", elety = "CA"), error = function(e) NULL)
+  if (is.null(pdb_A) || is.null(pdb_A$atom) || nrow(pdb_A$atom) == 0) {
+    cat(" - Skipping: no A chain or no CA atoms\n")
+    next
+  }
+  
+  out_path <- file.path(output_dir, basename(f))
+  tryCatch({
+    write.pdb(pdb_A, file = out_path)
+  }, error = function(e) {
+    cat(" - Failed to write:", basename(f), "\n")
+  })
+}
+```
+
+```{r}
+files <- list.files("FPs_chain_A", pattern = "\\.pdb$", full.names = TRUE)
+files <- files[file.exists(files) & !is.na(files)]
+# alignment
+pdbs <- pdbaln(files, exepath = muscle.path)
+```
+
+## Comparative structure analysis
+
+The detailed comparison of homologous protein structures can be used to infer pathways for evolutionary adaptation and, at closer evolutionary distances, mechanisms for conformational change.
+
+### Structure superposition
+
+Conventional structural superposition of proteins minimizes the root mean square difference between their full set of equivalent residues. This can be performed with Bio3D functions `pdbfit()` and `fit.xyz()` as outlined previously. However, for certain applications such a superposition procedure can be inappropriate. For example, in the comparison of a multi-domain protein that has undergone a hinge-like rearrangement of its domains, standard all atom superposition would result in an underestimate of the true atomic displacement by attempting superposition over all domains (whole structure superposition). A more appropriate and insightful superposition would be anchored at the most invariant region and hence more clearly highlight the domain rearrangement (sub-structure superposition).
+
+The Bio3D `core.find()` function implements an iterated superposition procedure, where residues displaying the largest positional differences are identified and excluded at each round. The function returns an ordered list of excluded residues, from which the user can select a subset of ’core’ residues upon which superposition can be based.
+
+```{r}
+# Identify the conserved core regions from the aligned structures
+core <- core.find(pdbs)
+# Color coding the core residues based on their positional variance (volume)
+# Positions with variance < 3 are colored yellow (moderately conserved)
+# Positions with variance < 1 are colored red (highly conserved)
+col=rep("black", length(core$volume))
+col[core$volume<3]="yellow"; col[core$volume<1]="red"
+plot(core, col=col)
+
+# Print and extract indices of the core residues with variance < 1.5 Å
+core.inds <- print(core, vol=1.5)
+write.pdb(xyz=pdbs$xyz[1,core.inds$xyz], file="./results/FPs_core.pdb")
+
+# Superimpose all structures using only the core atom indices for better alignment
+xyz <- pdbfit( pdbs, core.inds)
+```
+
+——————————————————————————————————————————————
+
+# An Example —— Calmodulin
+
+Calmodulin (CaM) is a 148 residues, 16.7 kDa, small, highly conserved calcium-binding protein that plays a central role in calcium signal transduction in eukaryotic cells. It is highly conserved and has for calcium bind sites. The structure of Ca²⁺ free is called apo CaM, Ca²⁺ binding structure is called holo CaM.
+
+```{r}
+# read PDB files
+apo  <- read.pdb("8BFG")
+holo <- read.pdb("8BD2")
+```
+
+```{r}
+# align sequence and strcuture
+aligned <- pdbaln(list(apo, holo))
+xyz <- pdbfit(aligned)  # xyz matrix aligned by C-alpha atoms
+```
+
+```{r}
+# RMSD
+rd <- rmsd(xyz, fit = TRUE)
+print(rd)
+# RMSF
+rmsf_vals <- rmsf(xyz)
+plot(rmsf_vals, typ="l", ylab="RMSF", xlab="Residue Index")
+```
+
+```{r}
+# calculate torsion
+tor_apo  <- torsion.pdb(apo)
+tor_holo <- torsion.pdb(holo)
+
+par(mfrow = c(2, 1), mar = c(4, 4, 3, 1))
+# Apo Ramachandran plot
+valid_apo <- !is.na(tor_apo$phi) & !is.na(tor_apo$psi)
+plot(tor_apo$phi[valid_apo], tor_apo$psi[valid_apo],
+     xlab = "phi", ylab = "psi", pch = 20, col = "blue",
+     main = "")
+title("Apo State (Calcium-Free)", line = 2)
+
+# Holo Ramachandran plot
+valid_holo <- !is.na(tor_holo$phi) & !is.na(tor_holo$psi)
+plot(tor_holo$phi[valid_holo], tor_holo$psi[valid_holo],
+     xlab = "phi", ylab = "psi", pch = 20, col = "red",
+     main = "")
+title("Holo State (Calcium-Bound)", line = 2)
+
+```
+
+```{r}
+valid <- !is.na(tor_apo$phi) & !is.na(tor_holo$phi)
+phi_diff <- tor_holo$phi[valid] - tor_apo$phi[valid]
+psi_diff <- tor_holo$psi[valid] - tor_apo$psi[valid]
+
+# Phi difference plot
+plot(phi_diff, type = "l", ylab = "Phi difference (°)", xlab = "Residue Index", col = "blue")
+title(main = "Torsion Angle Differences", outer = FALSE, line = 1)
+
+# Psi difference plot
+plot(psi_diff, type = "l", ylab = "Psi difference (°)", xlab = "Residue Index", col = "red")
+title(main = "Torsion Angle Differences", outer = FALSE, line = 1)
+```
+
+```{r}
+sessionInfo()
+```
+
+\

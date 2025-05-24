@@ -1,0 +1,80 @@
+---
+title: "Demo_3"
+author: "Shuyu Li"
+date: "2025-05-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(bio3d)
+```
+
+## Reading multi-model PDB files
+
+To enable read multi-model PDB file set `multi=TRUE`. The structure solved from NMR c
+
+```{r}
+# Read multi-model PDB file
+pdb <- read.pdb("1dmo", multi=TRUE)
+```
+
+```{r}
+# The xyz component contains 20 frames
+pdb$xyz
+
+```
+
+```{r}
+# Select a subset of the protein
+ca.inds <- atom.select(pdb, "calpha")
+
+# Access C-alpha coordinates of the first 5 models
+#pdb$xyz[1:5, ca.inds$xyz]
+```
+
+## Identification of dynamic domains
+
+Function **geostas()** attempts to identify rigid domains in a protein (or nucleic acid) structure based on knoweledge of its structural ensemble (as obtained a from multi-model PDB input file, an ensemble of multiple PDB files (see section below), NMA or MD results). 
+
+The `geostas()` function in **Bio3D** analyzes a structural ensemble and tries to:
+
+-   Cluster atoms (typically Cα atoms in proteins) into **rigid groups**.
+
+<!-- -->
+
+-   These groups are defined based on **how little their relative distances change** across the ensemble.
+
+-   It returns a classification of residues into **rigid domains** and can help **visualize domain motion**.
+
+```{r}
+# Domain analysis
+gs  <- geostas(pdb)
+```
+
+```{r}
+# Fit all frames to the 'first' domain
+domain.inds <- gs$inds[[1]]
+
+xyz <- pdbfit(pdb, inds=domain.inds)
+
+# write fitted coordinates
+write.pdb(pdb, xyz=xyz, chain=gs$atomgrps, file="1dmo_fit-domain1.pdb")
+
+# plot geostas results
+plot(gs, contour=FALSE)
+```
+
+## Invariant core identification
+
+```{r}
+core <- core.find(pdb)
+
+xyz <- pdbfit(pdb, inds=core)
+
+write.pdb(pdb, xyz=xyz, file="1dmo_fit_core.pdb")
+
+```
